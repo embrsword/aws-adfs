@@ -28,7 +28,7 @@ As of version 0.2.0, this tool acts on the 'default' profile unless an alternate
 ### MFA integration
 
 aws-adfs integrates with:
-* [duo security](https://duo.com) MFA provider
+* [duo security](https://duo.com) MFA provider with support for FIDO U2F hardware authenticator
 * [Symantec VIP](https://vip.symantec.com/) MFA provider
 * [RSA SecurID](https://www.rsa.com/) MFA provider
 
@@ -59,6 +59,32 @@ aws-adfs integrates with:
     deactivate
     ```
 
+* Windows 10
+
+   - Install latest supported Visual C++ downloads from Microsoft for Visual Studio 2015, 2017 and 2019:
+      - https://support.microsoft.com/en-us/help/2977003/the-latest-supported-visual-c-downloads
+      - https://aka.ms/vs/16/release/vc_redist.x64.exe
+    - Install Python 3.7 from Microsoft Store:
+      - https://www.microsoft.com/en-us/p/python-37/9nj46sx7x90p
+    - Start PowerShell as Administrator
+    - Go to `C:\Program Files`:
+        ```
+        C:
+        cd 'C:\Program Files\'
+        ```
+    - Create virtual env:
+      ```
+      python3 -m venv aws-adfs
+      ```
+    - Install `aws-adfs`:
+      ```
+      & 'C:\Program Files\aws-adfs\Scripts\pip' install aws-adfs
+      ```
+    - Run it:
+      ```
+      & 'C:\Program Files\aws-adfs\Scripts\aws-adfs' login --adfs-host=your-adfs-hostname
+      ```
+
 # Examples of usage
 
 ## `aws-adfs`
@@ -84,6 +110,18 @@ aws-adfs integrates with:
 
     ```
     aws --profile=specified-profile s3 ls
+    ```
+
+* login to your adfs host and fetch roles for AWS GovCloud (US)
+
+    ```
+    aws-adfs login --adfs-host=your-adfs-hostname --provider-id urn:amazon:webservices:govcloud --region us-gov-west-1
+    ```
+
+    and verification
+
+    ```
+    aws s3 ls
     ```
 
 * login to your adfs host within ansible playbook
@@ -157,9 +195,9 @@ aws-adfs integrates with:
     ```
     $ aws-adfs login --help
     Usage: aws-adfs login [OPTIONS]
-    
+
       Authenticates an user with active directory credentials
-    
+
     Options:
       --profile TEXT                  AWS cli profile that will be authenticated.
                                       After successful authentication just use:
@@ -207,8 +245,12 @@ aws-adfs integrates with:
       --assertfile TEXT               Use SAML assertion response from a local
                                       file
       --sspi / --no-sspi              Whether or not to use Kerberos SSO
-                                      authentication via SSPI, which may not work
-                                      in some environments.
+                                      authentication via SSPI (Windows only,
+                                      defaults to True).
+      --u2f-trigger-default / --no-u2f-trigger-default
+                                      Whether or not to also trigger the default
+                                      authentication method when U2F is available
+                                      (only works with Duo for now).
       --help                          Show this message and exit.
     ```
     ```
@@ -224,14 +266,38 @@ aws-adfs integrates with:
 
 # Known issues
 * duo-security
-    * Error: Cannot begin authentication process. The error response: {"message": "Unknown authentication method.", "stat": "FAIL"}
-    
-        Please setup preferred auth method in duo-sercurity settings (settings' -> 'My Settings & Devices').
+
+    `Error: Cannot begin authentication process. The error response: {"message": "Unknown authentication method.", "stat": "FAIL"}`
+
+    Please setup preferred auth method in duo-security settings (settings' -> 'My Settings & Devices').
+
+* USB FIDO U2F does not work in Windows Subsystem for Linux (WSL)
+
+    `OSError: [Errno 2] No such file or directory: '/sys/class/hidraw'`
+
+    USB devices are not accessible in WSL, please install and run `aws-adfs` on the Windows 10 host and then access the credentials in WSL from the filesystem. Example:
+
+    ```
+    export AWS_CONFIG_FILE=/mnt/c/Users/username/.aws/config
+    export AWS_SHARED_CREDENTIALS_FILE=/mnt/c/Users/username/.aws/credentials
+    ```
+
+*  FIDO U2F devices are not detected on Windows 10 build 1903 or newer
+
+    Running `aws-adfs` as Administrator is required since Windows 10 build 1903 to access FIDO U2F devices, cf. https://github.com/Yubico/python-fido2/issues/55)
+
 * in cases of trouble with lxml please install
 
   ```
   sudo apt-get install python-dev libxml2-dev libxslt1-dev zlib1g-dev
   ```
+
+* in cases of trouble with pykerberos please install
+
+  ```
+  sudo apt-get install python-dev libkrb5-dev
+  ```
+
 * in cases of trouble with OSX Sierra (obsolete OpenSSL), upgrade OpenSSL. Example:
   ```
   brew upgrade openssl
@@ -288,4 +354,28 @@ aws-adfs integrates with:
 * [rinrinne](https://github.com/rinrinne) for: Respect AWS_DEFAULT_PROFILE if defined
 * [mjernsell](https://github.com/mjernsell) for: Add support for AzureMfaAuthentication
 * [kfattig](https://github.com/kfattig) for: Handle sspi like other config options
- 
+* [pdecat](https://github.com/pdecat) for:
+    * lxml 4.4.0 dropped support for python 3.4
+    * Add Duo U2F support
+    * Use MozillaCookieJar as LWPCookieJar has an issue on Windows when cookies have an 'expires' date too far in the future and they are converted from timestamp to datetime
+    * Fix python 2.7 compatibility
+    * Document Windows 10 and WSL usage/issues
+    * Run tests with python 3.6, 3.7 and 3.8-dev
+    * Add options to trigger or not the default authentication method when U2F is available
+    * Fix AttributeError: 'generator' object has no attribute 'append' on python3
+    * Do not print stack trace if no U2F device is available
+    * Pin fido2 dependency to < 0.8.0 as it is a breaking release
+    * U2F: fido2 v0.8.1 compatibility (U2FClient.sign timeout renamed to event)
+* [bodgit](https://github.com/bodgit) for: Kerberos support
+* [pdecat](https://github.com/pdecat) for: 
+    * Duo: support U2F with no preferred factor or device configured
+    * Document new libkrb5-dev system dependency for pykerberos 
+    * Drop boto3 dependency
+    * Default SSPI to True on Windows only, False otherwise
+* [rheemskerk](https://github.com/rheemskerk) for:
+    * Fix username and password disclosure 
+    * Fix authentication with cookies on non-windows system.
+    * Change `AuthMethod` parameter to `FormsAuthentication`
+* [brodie11](https://github.com/brodie11) and [gregorydulin](https://github.com/gregorydulin) for: Add support for non-public AWS regions
+* [johan1252](https://github.com/johan1252) for: Ask for authentication method if there is no default method set in Duo Security settings
+* [pdecat](https://github.com/pdecat) for: Always return the same number of values from _initiate_authentication()

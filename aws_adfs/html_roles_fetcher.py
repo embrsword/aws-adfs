@@ -1,5 +1,6 @@
 import logging
 import os
+from platform import system
 import requests
 
 try:
@@ -12,8 +13,12 @@ _auth_provider = None
 _headers = {'Accept-Language': 'en'}
 
 try:
-    from requests_negotiate_sspi import HttpNegotiateAuth
-    _auth_provider = HttpNegotiateAuth
+    if system() == 'Windows':
+        from requests_negotiate_sspi import HttpNegotiateAuth
+        _auth_provider = HttpNegotiateAuth
+    else:
+        from requests_kerberos import HTTPKerberosAuth, OPTIONAL
+        _auth_provider = HTTPKerberosAuth
 except ImportError:
     pass
 
@@ -29,7 +34,8 @@ def fetch_html_encoded_roles(
         adfs_ca_bundle=None,
         username=None,
         password=None,
-        sspi=True
+        sspi=None,
+        u2f_trigger_default=None,
 ):
 
     # Support for Kerberos SSO on Windows via requests_negotiate_sspi
@@ -40,10 +46,15 @@ def fetch_html_encoded_roles(
 
     # Initiate session handler
     session = requests.Session()
-    session.cookies = cookielib.LWPCookieJar(filename=adfs_cookie_location)
+
+    # LWPCookieJar has an issue on Windows when cookies have an 'expires' date too far in the future and they are converted from timestamp to datetime.
+    # MozillaCookieJar works because it does not convert the timestamps.
+    # Duo uses 253402300799 for its cookies which translates into 9999-12-31T23:59:59Z.
+    # Windows 64bit maximum date is 3000-12-31T23:59:59Z, and 32bit is 2038-01-18T23:59:59Z.
+    session.cookies = cookielib.MozillaCookieJar(filename=adfs_cookie_location)
 
     try:
-        have_creds = (username and password) or _auth_provider
+        have_creds = (username and password) or (_auth_provider and sspi)
         session.cookies.load(ignore_discard=not(have_creds))
     except IOError as e:
         error_message = getattr(e, 'message', e)
@@ -61,14 +72,19 @@ def fetch_html_encoded_roles(
             elif '\\' in username: # Down-level logon name format
                 domain, username = username.split('\\', 1)
 
-        auth = _auth_provider(username, password, domain)
+        if system() == 'Windows':
+            auth = _auth_provider(username, password, domain)
+        elif username and domain:
+            auth = _auth_provider(principal="{}@{}".format(username, domain), mutual_authentication=OPTIONAL)
+        else:
+            auth = _auth_provider(mutual_authentication=OPTIONAL)
         data = None
     else:
         auth = None
         data={
             'UserName': username,
             'Password': password,
-            'AuthMethod': provider_id
+            'AuthMethod': 'FormsAuthentication'
         }
 
     if adfs_ca_bundle:

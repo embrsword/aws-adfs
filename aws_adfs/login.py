@@ -1,12 +1,13 @@
 import configparser
 
-import boto3
 import botocore
 import botocore.exceptions
 import botocore.session
 import click
 from botocore import client
 from os import environ
+import logging
+from platform import system
 import sys
 from . import authenticator
 from . import prepare
@@ -96,8 +97,13 @@ from . import role_chooser
 )
 @click.option(
     '--sspi/--no-sspi',
+    default=system() == 'Windows',
+    help='Whether or not to use Kerberos SSO authentication via SSPI (Windows only, defaults to True).',
+)
+@click.option(
+    '--u2f-trigger-default/--no-u2f-trigger-default',
     default=None,
-    help='Whether or not to use Kerberos SSO authentication via SSPI, which may not work in some environments.',
+    help='Whether or not to also trigger the default authentication method when U2F is available (only works with Duo for now).',
 )
 def login(
         profile,
@@ -116,7 +122,8 @@ def login(
         role_arn,
         session_duration,
         assertfile,
-        sspi
+        sspi,
+        u2f_trigger_default,
 ):
     """
     Authenticates an user with active directory credentials
@@ -131,7 +138,8 @@ def login(
         provider_id,
         s3_signature_version,
         session_duration,
-        sspi
+        sspi,
+        u2f_trigger_default,
     )
 
     _verification_checks(config)
@@ -189,8 +197,23 @@ def login(
     # Note, too, that if a SessionNotOnOrAfter attribute is also defined,
     # then the lesser value of the two attributes, SessionDuration or SessionNotOnOrAfter,
     # establishes the maximum duration of the console session.
-    _bind_aws_session_to_chosen_profile(config)
-    conn = boto3.client('sts', config=client.Config(signature_version=botocore.UNSIGNED))
+    try:
+        session = botocore.session.get_session()
+        session.set_config_variable('profile', config.profile)
+        conn = session.create_client(
+            'sts',
+            region_name=region,
+            config=client.Config(signature_version=botocore.UNSIGNED),
+        )
+    except botocore.exceptions.ProfileNotFound:
+        logging.debug('Profile {} does not exist yet'.format(config.profile))
+        session = botocore.session.get_session()
+        conn = session.create_client(
+            'sts',
+            region_name=region,
+            config=client.Config(signature_version=botocore.UNSIGNED),
+        )
+
     aws_session_token = conn.assume_role_with_saml(
         RoleArn=config.role_arn,
         PrincipalArn=principal_arn,
@@ -206,13 +229,6 @@ def login(
     else:
         _store(config, aws_session_token)
         _emit_summary(config, aws_session_duration)
-
-
-def _bind_aws_session_to_chosen_profile(config):
-    try:
-        boto3.setup_default_session(profile_name=config.profile)
-    except botocore.exceptions.ProfileNotFound:
-        pass
 
 
 def _emit_json(aws_session_token):
@@ -253,6 +269,8 @@ def _emit_summary(config, session_duration):
             * Provider ID                       : '{}'
             * S3 Signature Version              : '{}'
             * STS Session Duration in seconds   : '{}'
+            * SSPI:                             : '{}'
+            * U2F and default method            : '{}'
         """.format(
             config.profile,
             config.region,
@@ -265,6 +283,7 @@ def _emit_summary(config, session_duration):
             config.s3_signature_version,
             config.session_duration,
             config.sspi,
+            config.u2f_trigger_default,
         )
     )
 
@@ -358,6 +377,7 @@ def _store(config, aws_session_token):
         config_file.set(profile, 'adfs_config.session_duration', config.session_duration)
         config_file.set(profile, 'adfs_config.provider_id', config.provider_id)
         config_file.set(profile, 'adfs_config.sspi', config.sspi)
+        config_file.set(profile, 'adfs_config.u2f_trigger_default', config.u2f_trigger_default)
 
     store_config(config.profile, config.aws_credentials_location, credentials_storer)
     if config.profile == 'default':

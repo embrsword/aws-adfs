@@ -16,16 +16,19 @@ tests_require = [
 ]
 
 install_requires = [
-    'lxml',
+    'lxml<4.4.0;python_version<"3.5"',
+    'lxml;python_version>="3.5"',
     'click',
     'botocore>=1.12.6',
-    'boto3>=1.9.6',
     'requests[security]',
     'configparser',
+    'fido2>=0.8.1,<0.9.0',
 ]
 
 if system() == 'Windows':
     install_requires.append('requests-negotiate-sspi>=0.3.4')
+else:
+    install_requires.append('requests_kerberos')
 
 version = versioneer.get_version()
 

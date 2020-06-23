@@ -3,6 +3,7 @@ import configparser
 import os
 import botocore.session
 import botocore.exceptions
+from platform import system
 from types import MethodType
 
 
@@ -17,6 +18,7 @@ def get_prepared_config(
         s3_signature_version,
         session_duration,
         sspi,
+        u2f_trigger_default,
 ):
     """
     Prepares ADF configuration for login task.
@@ -38,6 +40,7 @@ def get_prepared_config(
     :param s3_signature_version: s3 signature version
     :param session_duration: AWS STS session duration (default 1 hour)
     :param sspi: Whether SSPI is enabled
+    :param u2f_trigger_default: Whether to also trigger the default authentication method when U2F is available
     """
     def default_if_none(value, default):
         return value if value is not None else default
@@ -60,6 +63,7 @@ def get_prepared_config(
     )
     adfs_config.session_duration = default_if_none(session_duration, adfs_config.session_duration)
     adfs_config.sspi = default_if_none(sspi, adfs_config.sspi)
+    adfs_config.u2f_trigger_default = default_if_none(u2f_trigger_default, adfs_config.u2f_trigger_default)
 
     return adfs_config
 
@@ -114,7 +118,10 @@ def create_adfs_default_config(profile):
     config.session_duration = int(3600)
 
     # Whether SSPI is enabled
-    config.sspi = True
+    config.sspi = system() == "Windows"
+
+    # Whether to also trigger the default authentication method when U2F is available
+    config.u2f_trigger_default = True
 
     return config
 
@@ -181,6 +188,9 @@ def _load_adfs_config_from_stored_profile(adfs_config, profile):
         adfs_config.sspi = ast.literal_eval(config.get_or(
             profile, 'adfs_config.sspi',
             str(adfs_config.sspi)))
+        adfs_config.u2f_trigger_default = ast.literal_eval(config.get_or(
+            profile, 'adfs_config.u2f_trigger_default',
+            str(adfs_config.u2f_trigger_default)))
 
     if profile == 'default':
         load_from_config(adfs_config.aws_config_location, profile, load_config)

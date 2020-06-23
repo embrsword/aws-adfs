@@ -27,7 +27,7 @@ class TestFetchHtmlEncodedRoles:
         cookie_jar.load = mock.Mock(side_effect=IOError('No cookie. Still hungry'))
         cookie_jar.clear = mock.Mock()
         html_roles_fetcher.cookielib = mock.Mock()
-        html_roles_fetcher.cookielib.LWPCookieJar = mock.Mock(return_value=cookie_jar)
+        html_roles_fetcher.cookielib.MozillaCookieJar = mock.Mock(return_value=cookie_jar)
 
         # and credentials are not provided
         no_credentials_provided = None
@@ -104,7 +104,7 @@ class TestFetchHtmlEncodedRoles:
             data={
                 'UserName': no_credentials_provided,
                 'Password': no_credentials_provided,
-                'AuthMethod': provider_id
+                'AuthMethod': 'FormsAuthentication'
             }
         )
 
